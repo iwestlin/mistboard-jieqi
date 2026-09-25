@@ -12,7 +12,7 @@ import {
 } from '../game/index.js';
 import { buildRecord, download, recordFilename, recordToText } from '../game/record.js';
 import { analyzePosition, type PositionAnalysis } from '../engine/analysis.js';
-import { engine, crossOriginIsolated } from '../engine/ceval.js';
+import { engine, crossOriginIsolated, type EvaluateOptions } from '../engine/ceval.js';
 import { h, button, clear, select } from './dom.js';
 import { JieqiBoard, type BoardArrow } from './board.js';
 import { coordLabel, pvLabels, uciLabel } from './notation.js';
@@ -23,11 +23,21 @@ export type PlayMode = 'hvh' | 'hvai';
 
 const DEPTHS = [4, 6, 8, 10, 12, 14, 16] as const;
 
-// Adaptive strength: shallow in the opening (fast), deeper as material comes off
-// and the endgame needs precision. Depth is interpolated over remaining pieces.
-const AUTO_MIN_DEPTH = 8;
-const AUTO_MAX_DEPTH = 18;
-const START_PIECES = 32;
+// Search strength. The default is a per-move time budget: the engine iterates
+// until time runs out, so it deepens automatically when the position is cheap
+// (endgame) and stays shallow when it is expensive (opening).
+type Strength = { kind: 'time'; ms: number } | { kind: 'depth'; depth: number };
+
+const TIME_STEPS = [2000, 5000, 10000] as const;
+const DEFAULT_TIME_MS = 5000;
+
+const STRENGTH_OPTIONS: readonly { value: string; label: string }[] = [
+  ...TIME_STEPS.map((ms) => ({
+    value: `time:${ms}`,
+    label: `每步 ${ms / 1000} 秒${ms === DEFAULT_TIME_MS ? '（推荐）' : ''}`,
+  })),
+  ...DEPTHS.map((d) => ({ value: `depth:${d}`, label: `固定深度 ${d}` })),
+];
 
 export class PlayView {
   private readonly board: JieqiBoard;
@@ -38,12 +48,13 @@ export class PlayView {
 
   private mode: PlayMode;
   private engineColor: JieqiColor;
-  private adaptive = true;
-  private depth: number;
+  private strength: Strength = { kind: 'time', ms: DEFAULT_TIME_MS };
   private autoFlip = false;
 
   private hint: PositionAnalysis | null = null;
   private hintPly = -1;
+  private hintThinking = false;
+  private hintToken = 0;
   private aiThinking = false;
   private aiToken = 0;
   private message = '';
@@ -54,7 +65,6 @@ export class PlayView {
   ) {
     this.mode = state.meta.mode;
     this.engineColor = state.meta.players.black.kind === 'engine' ? 'black' : 'red';
-    this.depth = 10;
     this.board = new JieqiBoard(this.boardHost, {
       onMove: (move) => this.playMove(move),
     });
@@ -110,14 +120,28 @@ export class PlayView {
     return turn !== this.engineColor;
   }
 
-  /** Engine depth for the current position: fixed, or scaled by remaining material. */
-  private effectiveDepth(): number {
-    if (!this.adaptive) return this.depth;
-    const board = this.state.session.current.board;
-    let pieces = 0;
-    for (const square in board) if (board[square]) pieces++;
-    const phase = 1 - Math.min(1, pieces / START_PIECES);
-    return Math.round(AUTO_MIN_DEPTH + phase * (AUTO_MAX_DEPTH - AUTO_MIN_DEPTH));
+  /** Search spec: a per-move time budget or a fixed depth. */
+  private searchOptions(): Pick<EvaluateOptions, 'depth' | 'movetime'> {
+    const strength = this.strength;
+    return strength.kind === 'time' ? { movetime: strength.ms } : { depth: strength.depth };
+  }
+
+  private strengthValue(): string {
+    const strength = this.strength;
+    return strength.kind === 'time' ? `time:${strength.ms}` : `depth:${strength.depth}`;
+  }
+
+  private parseStrength(value: string): Strength {
+    if (value.startsWith('time:')) return { kind: 'time', ms: Number(value.slice('time:'.length)) };
+    return { kind: 'depth', depth: Number(value.slice('depth:'.length)) };
+  }
+
+  private strengthText(): string {
+    const strength = this.strength;
+    if (strength.kind === 'time') {
+      return `AI 使用 PikaJieQi WASM；每步约 ${strength.ms / 1000} 秒，引擎在时限内自动加深（开局浅、残局深）。`;
+    }
+    return `AI 使用 PikaJieQi WASM；固定深度 ${strength.depth}。`;
   }
 
   private checkSquare(): string | null {
@@ -237,18 +261,10 @@ export class PlayView {
         h('div', { class: 'row' }, [
           h('label', { class: 'field-label', text: '引擎强度' }),
           select(
-            [
-              { value: 'auto', label: '自适应（开局浅 / 残局深）' },
-              ...DEPTHS.map((d) => ({ value: String(d), label: `深度 ${d}` })),
-            ],
-            this.adaptive ? 'auto' : String(this.depth),
+            STRENGTH_OPTIONS,
+            this.strengthValue(),
             (value) => {
-              if (value === 'auto') {
-                this.adaptive = true;
-              } else {
-                this.adaptive = false;
-                this.depth = Number(value);
-              }
+              this.strength = this.parseStrength(value);
               this.render();
             },
           ),
@@ -257,9 +273,7 @@ export class PlayView {
       card.append(
         h('p', {
           class: 'hint-text',
-          text: this.adaptive
-            ? `AI 使用 PikaJieQi WASM；当前深度 ${this.effectiveDepth()}，随子力减少逐渐加深（${AUTO_MIN_DEPTH}→${AUTO_MAX_DEPTH}）。`
-            : `AI 使用 PikaJieQi WASM（Pikafish 揭棋分支），运行在你的浏览器里，无需服务器。`,
+          text: this.strengthText(),
         }),
       );
     } else {
@@ -336,19 +350,39 @@ export class PlayView {
   private renderEngine(): HTMLElement {
     const card = h('div', { class: 'card' });
     card.append(h('h2', { text: '引擎提示' }));
+    const analyzing = this.hintThinking;
+    const analyzeButton = h(
+      'button',
+      {
+        class: analyzing ? 'btn btn--loading' : 'btn',
+        attrs: {
+          type: 'button',
+          disabled: this.state.session.finished || this.aiThinking || analyzing,
+        },
+        on: { click: () => this.runHint() },
+      },
+      analyzing ? [h('span', { class: 'spinner' }), '分析中…'] : ['分析当前局面'],
+    );
     card.append(
       h('div', { class: 'row row--buttons' }, [
-        button('分析当前局面', () => this.runHint(), {
-          disabled: this.state.session.finished || this.aiThinking,
-        }),
+        analyzeButton,
         button('清除', () => {
           this.hint = null;
           this.hintPly = -1;
+          this.hintToken++;
+          this.hintThinking = false;
           this.render();
         }),
       ]),
     );
-    if (this.hint && this.hintPly === this.state.session.plies.length) {
+    if (analyzing) {
+      card.append(
+        h('p', { class: 'engine-line' }, [
+          h('span', { class: 'badge badge--thinking', text: '引擎思考中…' }),
+          h('span', { class: 'muted', text: '  正在分析当前局面，约需几秒。' }),
+        ]),
+      );
+    } else if (this.hint && this.hintPly === this.state.session.plies.length) {
       const line = this.hint.lines[0];
       card.append(
         h('p', { class: 'engine-line' }, [
@@ -380,6 +414,8 @@ export class PlayView {
     if (!session.play(move)) return;
     this.hint = null;
     this.hintPly = -1;
+    this.hintToken++;
+    this.hintThinking = false;
     this.afterMove();
   }
 
@@ -404,7 +440,7 @@ export class PlayView {
     this.render();
 
     void engine
-      .evaluate({ fen: session.fenFor(this.engineColor), depth: this.effectiveDepth(), multiPv: 1 })
+      .evaluate({ fen: session.fenFor(this.engineColor), ...this.searchOptions(), multiPv: 1 })
       .then((result) => {
         if (token !== this.aiToken) return;
         this.aiThinking = false;
@@ -434,15 +470,22 @@ export class PlayView {
   private runHint(): void {
     const session = this.state.session;
     const ply = session.plies.length;
+    const token = ++this.hintToken;
     this.message = '';
-    void analyzePosition(session.current, ply, { depth: this.effectiveDepth(), multiPv: 2 })
+    this.hintThinking = true;
+    this.render();
+    void analyzePosition(session.current, ply, { ...this.searchOptions(), multiPv: 2 })
       .then((analysis) => {
+        if (token !== this.hintToken) return;
+        this.hintThinking = false;
         if (this.state.session.plies.length !== ply || this.state.session !== session) return;
         this.hint = analysis;
         this.hintPly = ply;
         this.render();
       })
       .catch((error: unknown) => {
+        if (token !== this.hintToken) return;
+        this.hintThinking = false;
         this.message = `引擎出错：${error instanceof Error ? error.message : String(error)}`;
         this.render();
       });
@@ -455,6 +498,8 @@ export class PlayView {
     this.aiThinking = false;
     this.message = '';
     this.hint = null;
+    this.hintToken++;
+    this.hintThinking = false;
     this.state.analysis = null;
     session.undo();
     if (this.mode === 'hvai' && session.turn === this.engineColor && session.plies.length > 0) {
@@ -479,6 +524,8 @@ export class PlayView {
     this.aiToken++;
     this.aiThinking = false;
     this.hint = null;
+    this.hintToken++;
+    this.hintThinking = false;
     this.message = '';
     const mode = this.mode;
     const humanColor = this.engineColor === 'red' ? 'black' : 'red';

@@ -77,12 +77,16 @@ export class ReviewView {
 
   /** Final analysis if the sweep finished, else the partial sweep. */
   private analysis(): GameAnalysis | null {
-    if (this.state.analysis) return this.state.analysis;
-    if (this.live.length === 0) return null;
+    const base = this.state.analysis;
+    if (!base && this.live.length === 0) return null;
+    // Manual per-position results override the (partial or completed) sweep so a
+    // re-analysis of the current position actually updates what is shown.
+    const byIndex = new Map((base?.positions ?? []).map((p) => [p.index, p]));
+    for (const analysis of this.live) byIndex.set(analysis.index, analysis);
     return buildGameAnalysis(
       this.state.session.positions,
-      [...this.live].sort((a, b) => a.index - b.index),
-      this.depth,
+      [...byIndex.values()].sort((a, b) => a.index - b.index),
+      base?.depth ?? this.depth,
     );
   }
 
@@ -134,6 +138,9 @@ export class ReviewView {
           () => this.analyzeCursor(),
           { disabled: this.analyzing || this.cursorAnalyzing },
         ),
+        button('下一步', () => this.nextStep(), {
+          disabled: this.analyzing || this.cursorAnalyzing || this.cursor >= session.plies.length,
+        }),
         button('导出棋谱 (JSON)', () => this.exportRecord('json')),
         button('导出记谱 (TXT)', () => this.exportRecord('txt')),
         button('回到对局', () => navigate('#/play')),
@@ -337,6 +344,13 @@ export class ReviewView {
     this.cursor = Math.max(0, Math.min(index, this.state.session.plies.length));
     this.render();
     this.sideColumn.querySelector('.move--current')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  /** Step one ply forward and analyze the resulting position. */
+  private nextStep(): void {
+    if (this.cursor >= this.state.session.plies.length) return;
+    this.goTo(this.cursor + 1);
+    this.analyzeCursor();
   }
 
   private onKey = (event: KeyboardEvent): void => {

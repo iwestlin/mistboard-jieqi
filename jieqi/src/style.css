@@ -243,6 +243,32 @@ h2 {
   background: #66aaff;
 }
 
+.btn--loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn--loading:disabled {
+  opacity: 0.9;
+  cursor: progress;
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #ffffff44;
+  border-top-color: #ffffff;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .select {
   background: #2a313b;
   color: var(--text);

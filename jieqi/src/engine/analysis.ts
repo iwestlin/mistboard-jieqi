@@ -65,6 +65,8 @@ export type GameAnalysis = {
 
 export type AnalyzeOptions = {
   depth?: number;
+  /** Per-position time budget in ms; overrides `depth` when set. */
+  movetime?: number;
   multiPv?: number;
   onProgress?: (done: number, total: number, latest: PositionAnalysis) => void;
   signal?: AbortSignal;
@@ -87,6 +89,7 @@ export async function analyzePosition(
   const result = await engine.evaluate({
     fen,
     depth: opts.depth ?? 12,
+    ...(opts.movetime && opts.movetime > 0 ? { movetime: opts.movetime } : {}),
     multiPv: opts.multiPv ?? 1,
     ...(opts.signal ? { signal: opts.signal } : {}),
   });
@@ -112,11 +115,17 @@ export async function analyzeGame(
 ): Promise<GameAnalysis> {
   const depth = opts.depth ?? 12;
   const multiPv = opts.multiPv ?? 2;
+  const movetime = opts.movetime;
   const analyses: PositionAnalysis[] = [];
 
   for (let i = 0; i < positions.length; i += 1) {
     if (opts.signal?.aborted) break;
-    const analysis = await analyzePosition(positions[i]!, i, { depth, multiPv, signal: opts.signal });
+    const analysis = await analyzePosition(positions[i]!, i, {
+      depth,
+      ...(movetime ? { movetime } : {}),
+      multiPv,
+      signal: opts.signal,
+    });
     analyses.push(analysis);
     opts.onProgress?.(analyses.length, positions.length, analysis);
   }

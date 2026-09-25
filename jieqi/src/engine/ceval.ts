@@ -41,6 +41,9 @@ export type EvaluateOptions = {
    *  way, so callers send per-position FENs and leave this empty. */
   moves?: readonly string[];
   depth?: number;
+  /** Soft time budget in ms. When set, the engine iterates until time is up
+   *  (deeper as the position allows) instead of stopping at a fixed depth. */
+  movetime?: number;
   multiPv?: number;
   signal?: AbortSignal;
   onUpdate?: (partial: EngineResult) => void;
@@ -282,7 +285,11 @@ export class JieqiEngine {
         resolve(result);
       });
       this.searching = true;
-      this.send(`go depth ${depth}`);
+      this.send(
+        req.movetime && req.movetime > 0
+          ? `go movetime ${Math.round(req.movetime)}`
+          : `go depth ${depth}`,
+      );
     });
   }
 
