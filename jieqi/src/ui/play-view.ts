@@ -16,7 +16,7 @@ import { engine, crossOriginIsolated, type EvaluateOptions } from '../engine/cev
 import { h, button, clear, select } from './dom.js';
 import { JieqiBoard, type BoardArrow } from './board.js';
 import { coordLabel, pvLabels, uciLabel } from './notation.js';
-import { ROLE_GLYPH } from './pieces.js';
+import { captureRow } from './captures.js';
 import { navigate, newGameState, randomId, type AppState } from './state.js';
 
 export type PlayMode = 'hvh' | 'hvai';
@@ -43,7 +43,8 @@ export class PlayView {
   private readonly board: JieqiBoard;
   private readonly boardHost = h('div', { class: 'board-host' });
   private readonly topBar = h('div', { class: 'turn-bar' });
-  private readonly captures = h('div', { class: 'captures' });
+  private readonly capturesTop = h('div', { class: 'captures captures--top' });
+  private readonly capturesBottom = h('div', { class: 'captures captures--bottom' });
   private readonly sideColumn = h('aside', { class: 'side-column' });
 
   private mode: PlayMode;
@@ -74,7 +75,12 @@ export class PlayView {
   private mount(): void {
     this.root.replaceChildren(
       h('div', { class: 'play-layout' }, [
-        h('section', { class: 'board-column' }, [this.topBar, this.boardHost, this.captures]),
+        h('section', { class: 'board-column' }, [
+          this.topBar,
+          this.capturesTop,
+          this.boardHost,
+          this.capturesBottom,
+        ]),
         this.sideColumn,
       ]),
     );
@@ -189,21 +195,12 @@ export class PlayView {
   private renderCaptures(): void {
     const session = this.state.session;
     const view = this.mode === 'hvai' ? session.playerView(this.state.perspective) : jieqiTruthView(session.current);
-    const forColor = (owner: JieqiColor) =>
-      view.captured
-        .filter((c) => c.owner === owner)
-        .map((c) => (c.role ? ROLE_GLYPH[owner][c.role] : '?'))
-        .join(' ');
-    this.captures.replaceChildren(
-      h('div', { class: 'capture-row capture-row--red' }, [
-        h('span', { class: 'capture-label', text: '红方损失' }),
-        h('span', { class: 'capture-pieces', text: forColor('red') || '—' }),
-      ]),
-      h('div', { class: 'capture-row capture-row--black' }, [
-        h('span', { class: 'capture-label', text: '黑方损失' }),
-        h('span', { class: 'capture-pieces', text: forColor('black') || '—' }),
-      ]),
-    );
+    // Captured pieces sit near the side that took them: the top colour's
+    // trophies (the bottom colour's losses) above the board, and vice versa.
+    const bottomColor = this.state.perspective;
+    const topColor = oppositeJieqiColor(bottomColor);
+    this.capturesTop.replaceChildren(captureRow(bottomColor, view.captured));
+    this.capturesBottom.replaceChildren(captureRow(topColor, view.captured));
   }
 
   private renderSideColumn(): void {

@@ -464,25 +464,36 @@ h2 {
 
 .captures {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
 }
 
 .capture-row {
   display: flex;
-  gap: 8px;
-  align-items: baseline;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .capture-label {
-  color: var(--muted);
-  min-width: 72px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
-.capture-pieces {
-  font-size: 19px;
-  letter-spacing: 2px;
+.capture-label--red {
+  color: #c0453a;
+}
+
+.capture-label--black {
+  color: #8fa3b8;
+}
+
+.capture-token {
+  width: 28px;
+  height: 28px;
+  flex: none;
 }
 
 /* ── move list ─────────────────────────────────────────────────────────── */

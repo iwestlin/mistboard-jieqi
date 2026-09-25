@@ -117,6 +117,8 @@ export type JieqiPlayerBoard = Partial<Record<JieqiSquare, JieqiVisibleBoardEntr
 export type JieqiCapturedView = {
   owner: JieqiColor;
   role: JieqiPieceRole | null;
+  /** True when the piece was still face-down (暗子) at the moment it was taken. */
+  faceDown: boolean;
 };
 
 export type JieqiPlayerView = {
@@ -572,7 +574,11 @@ export function jieqiTruthView(state: JieqiGameState): JieqiPlayerView {
     perspective: 'red',
     board,
     legalMoves: [],
-    captured: state.captures.map((c) => ({ owner: c.owner, role: c.role })),
+    captured: state.captures.map((c) => ({
+      owner: c.owner,
+      role: c.role,
+      faceDown: !c.revealedAtCapture,
+    })),
     inCheck: false,
     status: state.status,
     moveNumber: state.moveNumber,
@@ -605,7 +611,7 @@ export function getJieqiPlayerView(state: JieqiGameState, color: JieqiColor): Ji
   const captured: JieqiCapturedView[] = state.captures.map((c) => {
     const capturer = oppositeJieqiColor(c.owner);
     const known = c.revealedAtCapture || capturer === color;
-    return { owner: c.owner, role: known ? c.role : null };
+    return { owner: c.owner, role: known ? c.role : null, faceDown: !c.revealedAtCapture };
   });
 
   const legalMoves =
@@ -648,6 +654,7 @@ export function getJieqiPublicView(state: JieqiGameState): JieqiPlayerView {
   const captured: JieqiCapturedView[] = state.captures.map((c) => ({
     owner: c.owner,
     role: c.revealedAtCapture ? c.role : null,
+    faceDown: !c.revealedAtCapture,
   }));
   let inCheck = false;
   if (state.status.type === 'playing') {

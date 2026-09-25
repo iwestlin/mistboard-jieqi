@@ -6,6 +6,7 @@ import {
   getJieqiPlayerView,
   jieqiMaskedBoard,
   jieqiTruthView,
+  oppositeJieqiColor,
   type JieqiPlayerBoard,
 } from '../game/index.js';
 import { buildRecord, download, recordFilename, recordToText } from '../game/record.js';
@@ -21,6 +22,7 @@ import { winPercent } from '../engine/eval.js';
 import { crossOriginIsolated, engine } from '../engine/ceval.js';
 import { h, button, clear, select } from './dom.js';
 import { JieqiBoard, type BoardArrow, type BoardMarker } from './board.js';
+import { captureRow } from './captures.js';
 import { coordLabel, pvLabels, uciLabel } from './notation.js';
 import { navigate, type AppState } from './state.js';
 
@@ -35,13 +37,15 @@ const JUDGMENT_TEXT: Record<'blunder' | 'mistake' | 'inaccuracy', string> = {
 export class ReviewView {
   private readonly headerCard = h('div', { class: 'card' });
   private readonly boardHost = h('div', { class: 'board-host' });
+  private readonly capturesTop = h('div', { class: 'captures captures--top' });
+  private readonly capturesBottom = h('div', { class: 'captures captures--bottom' });
   private readonly boardColumn = h('div', { class: 'board-column' });
   private readonly sideColumn = h('aside', { class: 'side-column' });
   private readonly board: JieqiBoard;
 
   private cursor: number;
   private depth = 12;
-  private revealAll = true;
+  private revealAll = false;
   private analyzing = false;
   private cursorAnalyzing = false;
   private progress = '';
@@ -56,7 +60,7 @@ export class ReviewView {
   ) {
     this.cursor = state.session.plies.length;
     this.board = new JieqiBoard(this.boardHost, { onMove: () => {} });
-    this.boardColumn.append(this.headerCard, this.boardHost);
+    this.boardColumn.append(this.headerCard, this.capturesTop, this.boardHost, this.capturesBottom);
     this.root.replaceChildren(h('div', { class: 'review-layout' }, [this.boardColumn, this.sideColumn]));
     this.root.addEventListener('keydown', this.onKey);
     this.render();
@@ -71,6 +75,7 @@ export class ReviewView {
 
   private render(): void {
     this.renderHeader();
+    this.renderCaptures();
     this.renderBoard();
     this.renderSide();
   }
@@ -173,6 +178,23 @@ export class ReviewView {
         this.message ? h('span', { class: 'badge badge--warn', text: this.message }) : null,
       ]),
     );
+  }
+
+  /**
+   * Captured pieces for the position at the cursor. Unlike the live table this is
+   * always full-information: the opponent's capture of a still-dark piece is
+   * revealed too (drawn with a 暗 badge), independent of the board's reveal toggle.
+   */
+  private renderCaptures(): void {
+    const positions = this.state.session.positions;
+    const index = Math.max(0, Math.min(this.cursor, positions.length - 1));
+    const state = positions[index]!;
+    const view = jieqiTruthView(state);
+    const bottomColor = this.state.perspective;
+    const topColor = oppositeJieqiColor(bottomColor);
+    // Near each side: the pieces it captured (the opposite side's losses).
+    this.capturesTop.replaceChildren(captureRow(bottomColor, view.captured));
+    this.capturesBottom.replaceChildren(captureRow(topColor, view.captured));
   }
 
   private renderBoard(): void {
