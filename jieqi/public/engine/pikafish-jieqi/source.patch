@@ -109,6 +109,165 @@ index 95b3c14..6e8fdfd 100644
  };
  
  
+diff --git a/src/search.cpp b/src/search.cpp
+index a999a7e..f27d345 100644
+--- a/src/search.cpp
++++ b/src/search.cpp
+@@ -1680,6 +1680,17 @@ dark_undo:
+     }
+ 
+     Thread* thisThread = pos.this_thread();
++
++    // qsearch had no time check and no stop check, and the jieqi dark-piece
++    // recursion re-enters it at depth 0 without reducing depth, so a thread in
++    // one of these tails could not be stopped by `go movetime` and bestmove
++    // waited on the slowest helper. Same contract as search(): a value returned
++    // after a stop is discarded by the caller.
++    if (thisThread == Threads.main())
++        static_cast<MainThread*>(thisThread)->check_time();
++    if (Threads.stop.load(std::memory_order_relaxed))
++        return VALUE_ZERO;
++
+     bestMove = MOVE_NONE;
+     ss->inCheck = pos.checkers();
+     moveCount = 0;
+diff --git a/src/thread.cpp b/src/thread.cpp
+index be37fde..5522c73 100644
+--- a/src/thread.cpp
++++ b/src/thread.cpp
+@@ -33,23 +33,33 @@ ThreadPool Threads; // Global object
+ /// Thread constructor launches the thread and waits until it goes to sleep
+ /// in idle_loop(). Note that 'searching' and 'exit' should be already set.
+ 
++#if defined(PIKAFISH_SINGLE_THREAD)
++Thread::Thread(size_t n) : idx(n) {
++  searching = false;
++}
++#else
+ Thread::Thread(size_t n) : idx(n), stdThread(&Thread::idle_loop, this) {
+-
+   wait_for_search_finished();
+ }
++#endif
+ 
+ 
+ /// Thread destructor wakes up the thread in idle_loop() and waits
+ /// for its termination. Thread should be already waiting.
+ 
++#if defined(PIKAFISH_SINGLE_THREAD)
++Thread::~Thread() {
++  assert(!searching);
++}
++#else
+ Thread::~Thread() {
+-
+   assert(!searching);
+ 
+   exit = true;
+   start_searching();
+   stdThread.join();
+ }
++#endif
+ 
+ 
+ /// Thread::clear() reset histories, usually before a new game
+@@ -72,10 +82,17 @@ void Thread::clear() {
+ /// Thread::start_searching() wakes up the thread that will start the search
+ 
+ void Thread::start_searching() {
+-
++#if defined(PIKAFISH_SINGLE_THREAD)
++  if (exit)
++      return;
++  searching = true;
++  search();
++  searching = false;
++#else
+   std::lock_guard<std::mutex> lk(mutex);
+   searching = true;
+   cv.notify_one(); // Wake up the thread in idle_loop()
++#endif
+ }
+ 
+ 
+@@ -83,9 +100,12 @@ void Thread::start_searching() {
+ /// until the thread has finished searching.
+ 
+ void Thread::wait_for_search_finished() {
+-
++#if defined(PIKAFISH_SINGLE_THREAD)
++  while (searching) {}
++#else
+   std::unique_lock<std::mutex> lk(mutex);
+   cv.wait(lk, [&]{ return !searching; });
++#endif
+ }
+ 
+ 
+@@ -93,7 +113,9 @@ void Thread::wait_for_search_finished() {
+ /// condition variable, when it has no work to do.
+ 
+ void Thread::idle_loop() {
+-
++#if defined(PIKAFISH_SINGLE_THREAD)
++  return;
++#else
+   // If OS already scheduled us on a different group than 0 then don't overwrite
+   // the choice, eventually we are one of many one-threaded processes running on
+   // some Windows NUMA hardware, for instance in fishtest. To make it simple,
+@@ -116,6 +138,7 @@ void Thread::idle_loop() {
+ 
+       search();
+   }
++#endif
+ }
+ 
+ /// ThreadPool::set() creates/destroys threads to match the requested number.
+@@ -124,6 +147,10 @@ void Thread::idle_loop() {
+ 
+ void ThreadPool::set(size_t requested) {
+ 
++#if defined(PIKAFISH_SINGLE_THREAD)
++  requested = 1;
++#endif
++
+   if (size() > 0)   // destroy any existing thread(s)
+   {
+       main()->wait_for_search_finished();
+diff --git a/src/tt.cpp b/src/tt.cpp
+index c7118ae..21767e0 100644
+--- a/src/tt.cpp
++++ b/src/tt.cpp
+@@ -73,7 +73,11 @@ void TranspositionTable::resize(size_t mbSize) {
+   {
+       std::cerr << "Failed to allocate " << mbSize
+                 << "MB for transposition table." << std::endl;
++#if defined(__EMSCRIPTEN__)
++      return;
++#else
+       exit(EXIT_FAILURE);
++#endif
+   }
+ 
+   clear();
+@@ -85,6 +89,9 @@ void TranspositionTable::resize(size_t mbSize) {
+ 
+ void TranspositionTable::clear() {
+ 
++#if defined(PIKAFISH_SINGLE_THREAD)
++  std::memset(&table[0], 0, clusterCount * sizeof(Cluster));
++#else
+   std::vector<std::thread> threads;
+ 
+   for (size_t idx = 0; idx < Options["Threads"]; ++idx)
+@@ -107,6 +114,7 @@ void TranspositionTable::clear() {
+ 
+   for (std::thread& th : threads)
+       th.join();
++#endif
+ }
+ 
+ 
 diff --git a/src/uci.cpp b/src/uci.cpp
 index 634fe87..8382b6a 100644
 --- a/src/uci.cpp
@@ -218,25 +377,3 @@ index c4a4200..79db5a3 100644
  void loop(int argc, char* argv[]);
  std::string value(Value v);
  std::string square(Square s);
-diff --git a/src/search.cpp b/src/search.cpp
-index a999a7e7..f27d3452 100644
---- a/src/search.cpp
-+++ b/src/search.cpp
-@@ -1680,6 +1680,17 @@ dark_undo:
-     }
- 
-     Thread* thisThread = pos.this_thread();
-+
-+    // qsearch had no time check and no stop check, and the jieqi dark-piece
-+    // recursion re-enters it at depth 0 without reducing depth, so a thread in
-+    // one of these tails could not be stopped by `go movetime` and bestmove
-+    // waited on the slowest helper. Same contract as search(): a value returned
-+    // after a stop is discarded by the caller.
-+    if (thisThread == Threads.main())
-+        static_cast<MainThread*>(thisThread)->check_time();
-+    if (Threads.stop.load(std::memory_order_relaxed))
-+        return VALUE_ZERO;
-+
-     bestMove = MOVE_NONE;
-     ss->inCheck = pos.checkers();
-     moveCount = 0;

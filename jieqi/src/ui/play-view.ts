@@ -12,7 +12,7 @@ import {
 } from '../game/index.js';
 import { buildRecord, download, recordFilename, recordToText } from '../game/record.js';
 import { analyzePosition, type PositionAnalysis } from '../engine/analysis.js';
-import { engine, crossOriginIsolated, type EvaluateOptions } from '../engine/ceval.js';
+import { engine, type EvaluateOptions } from '../engine/ceval.js';
 import { h, button, clear, select } from './dom.js';
 import { JieqiBoard, type BoardArrow } from './board.js';
 import { coordLabel, pvLabels, uciLabel } from './notation.js';
@@ -86,9 +86,6 @@ export class PlayView {
     );
     this.render();
     this.maybeRunEngine();
-    if (!crossOriginIsolated()) {
-      this.message = '当前页面不是跨源隔离的，PikaJieQi 引擎无法加载（需要 COOP/COEP 响应头）。';
-    }
   }
 
   // ── rendering ─────────────────────────────────────────────────────────────

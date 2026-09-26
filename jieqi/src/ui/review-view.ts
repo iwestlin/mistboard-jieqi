@@ -19,7 +19,7 @@ import {
   type PositionAnalysis,
 } from '../engine/analysis.js';
 import { winPercent } from '../engine/eval.js';
-import { crossOriginIsolated, engine } from '../engine/ceval.js';
+import { engine } from '../engine/ceval.js';
 import { h, button, clear, select } from './dom.js';
 import { JieqiBoard, type BoardArrow, type BoardMarker } from './board.js';
 import { captureRow } from './captures.js';
@@ -391,11 +391,6 @@ export class ReviewView {
 
   private runAnalysis(): void {
     if (this.analyzing) return;
-    if (!crossOriginIsolated()) {
-      this.message = '当前页面不是跨源隔离的，引擎无法加载（需要 COOP/COEP）。';
-      this.render();
-      return;
-    }
     this.analyzing = true;
     this.live = [];
     this.state.analysis = null;

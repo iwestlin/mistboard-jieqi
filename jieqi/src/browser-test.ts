@@ -12,7 +12,7 @@ import {
 import { JieqiSession } from './game/session.js';
 import { buildRecord, parseRecord, sessionFromRecord } from './game/record.js';
 import { analyzeGame, analyzePosition } from './engine/analysis.js';
-import { crossOriginIsolated, engine } from './engine/ceval.js';
+import { crossOriginIsolated, engine, engineBuild } from './engine/ceval.js';
 
 const logEl = document.getElementById('log')!;
 const resultEl = document.getElementById('result')!;
@@ -35,7 +35,7 @@ const rng = (): number => {
 };
 
 async function run(): Promise<void> {
-  check('crossOriginIsolated', crossOriginIsolated());
+  log(`crossOriginIsolated=${crossOriginIsolated()} build=${engineBuild()}`);
 
   const deal = createJieqiDeal(rng);
   const initial = createInitialJieqiState('smoke', deal);

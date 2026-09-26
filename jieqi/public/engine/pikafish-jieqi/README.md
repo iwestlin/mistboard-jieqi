@@ -31,18 +31,41 @@ for.
 
 The build exposes a persistent `pikajieqi_command(const char*)` UCI entry point.
 `worker.js` hosts the module and forwards streaming UCI output to the web client.
-The generated module uses pthreads and therefore requires a cross-origin-isolated
-document.
+
+Two WASM builds ship side by side and share that same interface:
+
+- `pikajieqi.js` / `pikajieqi.wasm` — Emscripten pthreads build. Fastest, but it
+  needs `SharedArrayBuffer` and therefore a cross-origin-isolated document
+  (`COOP: same-origin` + `COEP: require-corp`).
+- `pikajieqi-st.js` / `pikajieqi-st.wasm` — single-threaded build. No
+  `SharedArrayBuffer`, so it runs on any document. The web client selects it
+  automatically when `crossOriginIsolated` is false (for example in WeChat's
+  in-app browser, which cannot be served COOP/COEP).
+
+Both are produced from the same patched source, so they play identically; the
+single-threaded build only gives up the helper thread pool.
+
+`src/thread.cpp` and `src/tt.cpp`: the engine unconditionally constructs
+`std::thread` helpers, and Emscripten's non-pthread `std::thread` aborts at
+runtime (`Aborted()`), so the single-threaded build defines
+`PIKAFISH_SINGLE_THREAD`. That guard makes `Thread` run its search inline,
+forces `ThreadPool::set` to one thread, and zeroes the transposition table with
+`memset` instead of a thread vector. The pthread build leaves the define off and
+compiles the original paths.
 
 ## Rebuild
 
 `pikajieqi-source-e75cee3.tar.gz` is the complete corresponding source used for
-the distributed binary. Extract it and run:
+the distributed binaries. Extract it and run (pass `all` to rebuild both
+variants):
 
 ```sh
 docker run --rm -v "$PWD:/src" -w /src emscripten/emsdk:3.1.74 \
-  bash wasm/build.sh
+  bash wasm/build.sh all
 ```
+
+`build.sh [threads|single|all] [out_dir]` writes `pikajieqi.js/.wasm` for the
+pthread build and `pikajieqi-st.js/.wasm` for the single-threaded build.
 
 For a smaller audit trail, the same source is reproducible from the exact
 upstream commit plus the adjacent `source.patch`:
@@ -55,7 +78,7 @@ git apply /path/to/source.patch   # WASM entry points + the misc.h and search.cp
 mkdir -p wasm
 cp /path/to/build.sh wasm/build.sh
 docker run --rm -v "$PWD:/src" -w /src emscripten/emsdk:3.1.74 \
-  bash wasm/build.sh
+  bash wasm/build.sh all
 ```
 
 Keep this README, the source archive, `source.patch`, `build.sh`, and

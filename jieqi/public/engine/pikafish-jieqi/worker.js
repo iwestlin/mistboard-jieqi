@@ -7,7 +7,12 @@ self.addEventListener('message', async (event) => {
   const message = event.data;
   if (message?.type === 'init') {
     try {
-      importScripts(message.jsUrl);
+      try {
+        importScripts(message.jsUrl);
+      } catch (loadError) {
+        const detail = loadError instanceof Error ? loadError.message : String(loadError);
+        throw new Error(`failed to load engine build (${message.build ?? 'threads'}): ${message.jsUrl} — ${detail}`);
+      }
       const factory = self.PikaJieQi;
       if (typeof factory !== 'function') {
         throw new Error('PikaJieQi factory missing after script load');

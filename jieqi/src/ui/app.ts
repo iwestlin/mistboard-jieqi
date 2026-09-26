@@ -1,7 +1,7 @@
 // App shell: header + hash routing between the play and review screens.
 
 import { parseRecord, sessionFromRecord } from '../game/record.js';
-import { crossOriginIsolated, engine } from '../engine/ceval.js';
+import { engine } from '../engine/ceval.js';
 import { h, button } from './dom.js';
 import { PlayView } from './play-view.js';
 import { ReviewView } from './review-view.js';
@@ -66,16 +66,12 @@ export class App {
   }
 
   private async loadEngine(): Promise<void> {
-    if (!crossOriginIsolated()) {
-      this.status.textContent = '引擎：页面非跨源隔离（需要 COOP/COEP）';
-      this.status.className = 'engine-status engine-status--error';
-      return;
-    }
     this.status.textContent = '引擎：加载中…';
     this.status.className = 'engine-status';
     try {
       await engine.preload();
-      this.status.textContent = '引擎：就绪';
+      const mode = engine.activeBuild() === 'single' ? '单线程' : '多线程';
+      this.status.textContent = `引擎：就绪（${mode}）`;
       this.status.className = 'engine-status engine-status--ready';
     } catch (error) {
       this.status.textContent = `引擎：失败（${error instanceof Error ? error.message : String(error)}）`;

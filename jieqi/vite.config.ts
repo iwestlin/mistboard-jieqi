@@ -1,8 +1,11 @@
 import { defineConfig } from 'vite';
 
-// PikaJieQi is built with Emscripten pthreads, so the page must be
-// cross-origin isolated (SharedArrayBuffer). Static hosts need the same two
-// headers; see README.
+// PikaJieQi ships a pthread build and a single-threaded build. The pthread one
+// is used only when the page is cross-origin isolated (COOP/COEP headers, which
+// give it SharedArrayBuffer); otherwise the client falls back to the
+// single-threaded build, so the app still loads in in-app browsers without
+// these headers. Static hosts that can send the two headers get the faster
+// pthread build; see README.
 const crossOriginIsolation = {
   'Cross-Origin-Opener-Policy': 'same-origin',
   'Cross-Origin-Embedder-Policy': 'require-corp',

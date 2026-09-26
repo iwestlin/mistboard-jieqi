@@ -73,6 +73,24 @@ export function crossOriginIsolated(): boolean {
 }
 
 /**
+ * Which PikaJieQi build the page can actually run. The pthread build needs a
+ * SharedArrayBuffer, which browsers only hand to cross-origin isolated
+ * documents; in-app browsers such as WeChat's cannot be served COOP/COEP, so
+ * there we fall back to the single-threaded build instead of refusing to load.
+ */
+export type EngineBuild = 'threads' | 'single';
+
+export function engineBuild(): EngineBuild {
+  return crossOriginIsolated() ? 'threads' : 'single';
+}
+
+/** Assets for each build, relative to `ENGINE_BASE`. */
+const ENGINE_FILES: Record<EngineBuild, { js: string; wasm: string }> = {
+  threads: { js: 'pikajieqi.js', wasm: 'pikajieqi.wasm' },
+  single: { js: 'pikajieqi-st.js', wasm: 'pikajieqi-st.wasm' },
+};
+
+/**
  * Complete MultiPV bursts only. The engine re-prints every MultiPV line each
  * time one PV finishes, and un-researched lines carry the previous depth; a
  * mid-burst snapshot pairs the new best line with stale siblings.
@@ -110,6 +128,7 @@ function createBurstCollector(multiPv: number) {
 export class JieqiEngine {
   private worker: Worker | null = null;
   private ready: Promise<void> | null = null;
+  private build: EngineBuild | null = null;
   private listeners = new Set<(line: string) => void>();
   private searching = false;
   private token = 0;
@@ -126,12 +145,14 @@ export class JieqiEngine {
     return this.worker !== null;
   }
 
+  /** Build backing the running engine, or null before the first load. */
+  activeBuild(): EngineBuild | null {
+    return this.build;
+  }
+
   private async spawn(): Promise<void> {
-    if (!crossOriginIsolated()) {
-      throw new EngineUnavailableError(
-        'PikaJieQi needs a cross-origin isolated page (COOP: same-origin, COEP: require-corp) to start its pthread pool.',
-      );
-    }
+    const build = engineBuild();
+    const files = ENGINE_FILES[build];
     const worker = new Worker(engineAsset('worker.js'));
     this.worker = worker;
     worker.onmessage = (event: MessageEvent<EngineMessage>) => {
@@ -143,6 +164,16 @@ export class JieqiEngine {
     };
 
     await new Promise<void>((resolve, reject) => {
+      const fail = (error: unknown): void => {
+        worker.terminate();
+        this.worker = null;
+        this.ready = null; // allow a later preload() to retry
+        reject(
+          error instanceof EngineUnavailableError
+            ? error
+            : new EngineUnavailableError(error instanceof Error ? error.message : String(error)),
+        );
+      };
       const onMessage = (event: MessageEvent<EngineMessage>) => {
         const message = event.data;
         if (message.type === 'ready') {
@@ -150,18 +181,19 @@ export class JieqiEngine {
           resolve();
         } else if (message.type === 'error') {
           worker.removeEventListener('message', onMessage);
-          reject(new EngineUnavailableError(message.error ?? 'engine worker init failed'));
+          fail(message.error ?? 'engine worker init failed');
         }
       };
       worker.addEventListener('message', onMessage);
-      worker.onerror = (event) =>
-        reject(new EngineUnavailableError(`engine worker error: ${event.message}`));
+      worker.onerror = (event) => fail(`engine worker error: ${event.message}`);
       worker.postMessage({
         type: 'init',
-        jsUrl: engineAsset('pikajieqi.js'),
-        wasmUrl: engineAsset('pikajieqi.wasm'),
+        build,
+        jsUrl: engineAsset(files.js),
+        wasmUrl: engineAsset(files.wasm),
       });
     });
+    this.build = build;
 
     const uciOk = this.waitFor((line) => line === 'uciok');
     this.send('uci');
