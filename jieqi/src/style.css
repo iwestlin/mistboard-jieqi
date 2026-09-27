@@ -146,8 +146,16 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  position: sticky;
-  top: 16px;
+}
+
+/* Sticky only makes sense next to the taller side column. In the single-column
+   mobile layout it floated the board over the controls below, so keep it for
+   the two-column layout only. */
+@media (min-width: 881px) {
+  .board-column {
+    position: sticky;
+    top: 16px;
+  }
 }
 
 .side-column {
@@ -291,7 +299,8 @@ h2 {
   display: block;
   border-radius: 14px;
   user-select: none;
-  touch-action: none;
+  /* Taps only; allow vertical swipes so the page can scroll over the board. */
+  touch-action: manipulation;
 }
 
 .board-bed {
