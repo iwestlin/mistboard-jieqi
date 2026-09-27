@@ -70,7 +70,31 @@ export type AnalyzeOptions = {
   multiPv?: number;
   onProgress?: (done: number, total: number, latest: PositionAnalysis) => void;
   signal?: AbortSignal;
+  /** Reuse store: positions already analyzed at the same parameters are skipped. */
+  cache?: AnalysisCache;
 };
+
+/**
+ * Reuses engine results across sweeps and single-position runs. Reviewing steps
+ * back and forth over the same positions, and re-running the whole game must not
+ * re-search anything already covered at the same depth and MultiPV.
+ */
+export class AnalysisCache {
+  private readonly entries = new Map<string, PositionAnalysis>();
+
+  private static key(fen: string, depth: number, multiPv: number, movetime?: number): string {
+    const budget = movetime && movetime > 0 ? `t${movetime}` : `d${depth}`;
+    return `${budget}|${multiPv}|${fen}`;
+  }
+
+  get(fen: string, depth: number, multiPv: number, movetime?: number): PositionAnalysis | undefined {
+    return this.entries.get(AnalysisCache.key(fen, depth, multiPv, movetime));
+  }
+
+  set(analysis: PositionAnalysis, depth: number, multiPv: number, movetime?: number): void {
+    this.entries.set(AnalysisCache.key(analysis.fen, depth, multiPv, movetime), analysis);
+  }
+}
 
 /** Side-to-move POV score of a position, from the engine's top line. */
 export function analysisScore(a: PositionAnalysis): { cp: number | null; mate: number | null } {
@@ -86,14 +110,19 @@ export async function analyzePosition(
   opts: AnalyzeOptions = {},
 ): Promise<PositionAnalysis> {
   const fen = jieqiStateToPikafishFen(state);
+  const depth = opts.depth ?? 12;
+  const multiPv = opts.multiPv ?? 1;
+  const cached = opts.cache?.get(fen, depth, multiPv, opts.movetime);
+  if (cached) return { ...cached, index };
+
   const result = await engine.evaluate({
     fen,
-    depth: opts.depth ?? 12,
+    depth,
     ...(opts.movetime && opts.movetime > 0 ? { movetime: opts.movetime } : {}),
-    multiPv: opts.multiPv ?? 1,
+    multiPv,
     ...(opts.signal ? { signal: opts.signal } : {}),
   });
-  return {
+  const analysis: PositionAnalysis = {
     index,
     fen,
     best: result.best,
@@ -103,6 +132,8 @@ export async function analyzePosition(
     depth: result.depth,
     lines: result.lines,
   };
+  opts.cache?.set(analysis, depth, multiPv, opts.movetime);
+  return analysis;
 }
 
 /**
@@ -125,6 +156,7 @@ export async function analyzeGame(
       ...(movetime ? { movetime } : {}),
       multiPv,
       signal: opts.signal,
+      cache: opts.cache,
     });
     analyses.push(analysis);
     opts.onProgress?.(analyses.length, positions.length, analysis);

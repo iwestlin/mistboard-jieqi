@@ -9,9 +9,10 @@ import {
   oppositeJieqiColor,
   type JieqiPlayerBoard,
 } from '../game/index.js';
-import { buildRecord, download, recordFilename, recordToText } from '../game/record.js';
+// 棋谱导出暂时下线，恢复「导出」按钮时一并启用：
+// import { buildRecord, download, recordFilename, recordToText } from '../game/record.js';
 import {
-  analyzeGame,
+  AnalysisCache,
   analyzePosition,
   buildGameAnalysis,
   type GameAnalysis,
@@ -24,7 +25,7 @@ import { h, button, clear, select } from './dom.js';
 import { JieqiBoard, type BoardArrow, type BoardMarker } from './board.js';
 import { captureRow } from './captures.js';
 import { coordLabel, pvLabels, uciLabel } from './notation.js';
-import { navigate, type AppState } from './state.js';
+import type { AppState } from './state.js';
 
 const DEPTHS = [6, 8, 10, 12, 14, 16, 18] as const;
 
@@ -46,10 +47,15 @@ export class ReviewView {
   private cursor: number;
   private depth = 12;
   private revealAll = false;
+  private autoAnalyze = true;
   private analyzing = false;
   private cursorAnalyzing = false;
+  /** Invalidates an in-flight single-position search when a newer one starts. */
+  private cursorToken = 0;
   private progress = '';
   private message = '';
+  /** Reuses per-position results; stepping revisits positions constantly. */
+  private readonly cache = new AnalysisCache();
   /** Positions analyzed so far in the running sweep (live feedback). */
   private live: PositionAnalysis[] = [];
   private abort: AbortController | null = null;
@@ -99,6 +105,11 @@ export class ReviewView {
     return this.analysis()?.moves.find((m) => m.ply === index + 1);
   }
 
+  /** Engine result for the position the cursor sits on, if one exists yet. */
+  private cursorAnalysis(): PositionAnalysis | null {
+    return this.analysis()?.positions.find((p) => p.index === this.cursor) ?? null;
+  }
+
   private renderHeader(): void {
     const session = this.state.session;
     const status = session.status();
@@ -114,12 +125,18 @@ export class ReviewView {
             ? '和棋'
             : `${status.winner === 'red' ? '红方' : '黑方'}胜`;
     const termination = status.type === 'finished' ? reasonLabel(status.reason) : '对局未结束';
-    const analysis = this.state.analysis;
-    const accuracy = analysis
-      ? `准确率 红 ${analysis.accuracy.red.toFixed(1)}% · 黑 ${analysis.accuracy.black.toFixed(1)}%`
+    const global = this.state.analysis;
+    const merged = this.analysis();
+    const cursorDone = Boolean(merged?.positions.some((p) => p.index === this.cursor));
+    // A per-position analysis (from 自动分析 or 分析当前局面) has no whole-game
+    // accuracy, but it must still show that the position was analyzed.
+    const accuracy = global
+      ? `准确率 红 ${global.accuracy.red.toFixed(1)}% · 黑 ${global.accuracy.black.toFixed(1)}%`
       : this.analyzing
         ? this.progress
-        : '尚未分析';
+        : merged
+          ? `已分析 ${merged.positions.length}/${session.positions.length} 个局面`
+          : '尚未分析';
 
     this.headerCard.append(
       h('div', { class: 'review-head' }, [
@@ -133,22 +150,27 @@ export class ReviewView {
 
     this.headerCard.append(
       h('div', { class: 'row row--buttons' }, [
-        button(this.analyzing ? '分析中…' : '分析全局', () => this.runAnalysis(), {
-          class: 'btn--primary',
-          disabled: this.analyzing || this.cursorAnalyzing || session.plies.length === 0,
-        }),
-        button('停止', () => this.stopAnalysis(), { disabled: !this.analyzing && !this.cursorAnalyzing }),
+        // 「分析全局」耗时较长，暂时下线；恢复时取消注释即可。
+        // button(this.analyzing ? '分析中…' : '分析全局', () => this.runAnalysis(), {
+        //   class: 'btn--primary',
+        //   disabled: this.analyzing || this.cursorAnalyzing || session.plies.length === 0,
+        // }),
         button(
-          this.cursorAnalyzing ? '分析中…' : '分析当前局面',
+          this.cursorAnalyzing ? '分析中…' : cursorDone ? '重新分析当前局面' : '分析当前局面',
           () => this.analyzeCursor(),
           { disabled: this.analyzing || this.cursorAnalyzing },
         ),
-        button('下一步', () => this.nextStep(), {
+        button('停止', () => this.stopAnalysis(), { disabled: !this.analyzing && !this.cursorAnalyzing }),
+        button('上一步', () => this.step(-1), {
+          disabled: this.analyzing || this.cursorAnalyzing || this.cursor <= 0,
+        }),
+        button('下一步', () => this.step(1), {
           disabled: this.analyzing || this.cursorAnalyzing || this.cursor >= session.plies.length,
         }),
-        button('导出棋谱 (JSON)', () => this.exportRecord('json')),
-        button('导出记谱 (TXT)', () => this.exportRecord('txt')),
-        button('回到对局', () => navigate('#/play')),
+        // 导出与返回入口暂时下线。
+        // button('导出棋谱 (JSON)', () => this.exportRecord('json')),
+        // button('导出记谱 (TXT)', () => this.exportRecord('txt')),
+        // button('回到对局', () => navigate('#/play')),
       ]),
     );
 
@@ -174,6 +196,18 @@ export class ReviewView {
             },
           }),
           h('span', { text: '显示真实棋子（复盘视角）' }),
+        ]),
+        h('label', { class: 'checkbox-row' }, [
+          h('input', {
+            attrs: { type: 'checkbox', checked: this.autoAnalyze },
+            on: {
+              change: (event: Event) => {
+                this.autoAnalyze = (event.target as HTMLInputElement).checked;
+                this.render();
+              },
+            },
+          }),
+          h('span', { text: '自动分析' }),
         ]),
         this.message ? h('span', { class: 'badge badge--warn', text: this.message }) : null,
       ]),
@@ -318,9 +352,8 @@ export class ReviewView {
   private renderEnginePanel(): HTMLElement {
     const card = h('div', { class: 'card' });
     card.append(h('h2', { text: 'AI 推荐' }));
-    const analysis = this.analysis();
     const index = this.cursor;
-    const position = analysis?.positions.find((p) => p.index === index) ?? null;
+    const position = this.cursorAnalysis();
     if (!position) {
       card.append(h('p', { class: 'muted', text: '该局面还没有分析结果。' }));
       return card;
@@ -365,22 +398,39 @@ export class ReviewView {
   private goTo(index: number): void {
     this.cursor = Math.max(0, Math.min(index, this.state.session.plies.length));
     this.render();
-    this.sideColumn.querySelector('.move--current')?.scrollIntoView({ block: 'nearest' });
+    this.revealCurrentMove();
   }
 
-  /** Step one ply forward and analyze the resulting position. */
-  private nextStep(): void {
-    if (this.cursor >= this.state.session.plies.length) return;
-    this.goTo(this.cursor + 1);
-    this.analyzeCursor();
+  /**
+   * Keep the highlighted move inside the move list. Adjusting the list's own
+   * scrollTop does that without moving the page, unlike scrollIntoView, which
+   * also scrolls every scrollable ancestor.
+   */
+  private revealCurrentMove(): void {
+    const list = this.sideColumn.querySelector<HTMLElement>('.scroll--moves');
+    const current = list?.querySelector<HTMLElement>('.move--current');
+    if (!list || !current) return;
+    const listRect = list.getBoundingClientRect();
+    const moveRect = current.getBoundingClientRect();
+    if (moveRect.top < listRect.top) list.scrollTop -= listRect.top - moveRect.top;
+    else if (moveRect.bottom > listRect.bottom) list.scrollTop += moveRect.bottom - listRect.bottom;
+  }
+
+  /** Step one ply and, when 自动分析 is on, analyze the position we land on. */
+  private step(delta: number): void {
+    const next = this.cursor + delta;
+    if (next < 0 || next > this.state.session.plies.length) return;
+    this.goTo(next);
+    // A whole-game sweep already owns the engine; let it finish first.
+    if (this.autoAnalyze && !this.analyzing) this.analyzeCursor();
   }
 
   private onKey = (event: KeyboardEvent): void => {
     if (event.key === 'ArrowLeft') {
-      this.goTo(this.cursor - 1);
+      this.step(-1);
       event.preventDefault();
     } else if (event.key === 'ArrowRight') {
-      this.goTo(this.cursor + 1);
+      this.step(1);
       event.preventDefault();
     } else if (event.key === 'Home') {
       this.goTo(0);
@@ -389,6 +439,9 @@ export class ReviewView {
     }
   };
 
+  // 「分析全局」耗时较长，暂时下线：按钮和这个方法一起注释，恢复时取消注释，
+  // 并把上面的 analyzeGame 重新加回 import。
+  /*
   private runAnalysis(): void {
     if (this.analyzing) return;
     this.analyzing = true;
@@ -403,6 +456,7 @@ export class ReviewView {
       depth: this.depth,
       multiPv: 2,
       signal: this.abort.signal,
+      cache: this.cache,
       onProgress: (done, total, latest) => {
         this.live = this.live.filter((a) => a.index !== latest.index).concat(latest);
         this.progress = `分析中… ${done}/${total}`;
@@ -422,11 +476,13 @@ export class ReviewView {
         this.render();
       });
   }
+  */
 
   private stopAnalysis(): void {
     this.abort?.abort();
     this.abort = null;
     engine.stop();
+    this.cursorToken += 1;
     this.analyzing = false;
     this.cursorAnalyzing = false;
     this.progress = '';
@@ -435,29 +491,37 @@ export class ReviewView {
 
   private analyzeCursor(): void {
     const index = this.cursor;
+    const token = ++this.cursorToken;
+    const controller = new AbortController();
     this.message = '';
     this.cursorAnalyzing = true;
-    this.abort = new AbortController();
+    this.abort = controller;
     this.render();
     void analyzePosition(this.state.session.positions[index]!, index, {
       depth: this.depth,
       multiPv: 2,
-      signal: this.abort.signal,
+      signal: controller.signal,
+      cache: this.cache,
     })
       .then((analysis) => {
+        if (token !== this.cursorToken) return;
         this.cursorAnalyzing = false;
-        this.abort = null;
+        if (this.abort === controller) this.abort = null;
         this.live = this.live.filter((a) => a.index !== index).concat(analysis);
         this.render();
       })
       .catch((error: unknown) => {
+        if (token !== this.cursorToken) return;
         this.cursorAnalyzing = false;
-        this.abort = null;
+        if (this.abort === controller) this.abort = null;
         this.message = `引擎出错：${error instanceof Error ? error.message : String(error)}`;
         this.render();
       });
   }
 
+  // 棋谱导出暂时下线：按钮和这个方法一起注释，恢复时取消注释，并加回上面
+  // record.js 与 state.js 的 navigate 导入。
+  /*
   private exportRecord(kind: 'json' | 'txt'): void {
     const record = buildRecord(this.state.session, this.state.meta, this.state.analysis ?? undefined);
     if (kind === 'json') {
@@ -466,6 +530,7 @@ export class ReviewView {
       download(recordFilename(record).replace(/\.json$/, '.txt'), recordToText(record), 'text/plain');
     }
   }
+  */
 }
 
 function findGeneral(board: JieqiPlayerBoard | Record<string, unknown>, color: string): string | null {
