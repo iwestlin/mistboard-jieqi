@@ -49,7 +49,7 @@ export function captureToken(
     add('path', {
       d: path,
       fill: stroke,
-      transform: 'translate(50 50) scale(0.82) translate(-50 -50)',
+      transform: 'translate(50 50) scale(0.92) translate(-50 -50)',
     });
   } else {
     const text = add('text', {
@@ -57,7 +57,7 @@ export function captureToken(
       y: 50,
       'text-anchor': 'middle',
       'dominant-baseline': 'central',
-      'font-size': 56,
+      'font-size': 63,
       fill: stroke,
     });
     text.textContent = ROLE_GLYPH[color][role];

@@ -160,7 +160,7 @@ function riverSvg(perspective: JieqiColor): string {
 
 function glyphSvg(color: JieqiColor, role: JieqiPieceRole, cx: number, cy: number): string {
   const d = glyphPath(color, role);
-  const scale = (PIECE_R * 2 * 0.82) / 100;
+  const scale = (PIECE_R * 2 * 0.92) / 100;
   const fill = color === 'red' ? RED : BLACK;
   if (!d) {
     // Fallback if a glyph path is missing: draw the character as text.
