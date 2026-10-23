@@ -23,6 +23,7 @@ export class App {
     this.root.replaceChildren(this.header(), this.main, this.footer());
     window.addEventListener('hashchange', () => this.route());
     this.route();
+    void this.loadEngine();
   }
 
   private header(): HTMLElement {
@@ -59,7 +60,6 @@ export class App {
         h('a', { class: 'nav__link', text: '复盘分析', attrs: { href: '#/review' } }),
         button('导入棋谱', () => fileInput.click()),
         fileInput,
-        button('加载引擎', () => void this.loadEngine()),
         this.status,
       ]),
     ]);

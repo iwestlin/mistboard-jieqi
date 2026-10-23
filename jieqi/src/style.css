@@ -326,6 +326,10 @@ h2 {
 
 .board-hit {
   fill: transparent;
+}
+
+.board-hit--clickable,
+.piece-slot--clickable {
   cursor: pointer;
 }
 

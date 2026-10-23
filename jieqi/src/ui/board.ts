@@ -160,14 +160,14 @@ function riverSvg(perspective: JieqiColor): string {
 
 function glyphSvg(color: JieqiColor, role: JieqiPieceRole, cx: number, cy: number): string {
   const d = glyphPath(color, role);
-  const scale = (PIECE_R * 2 * 0.92) / 100;
+  const scale = (PIECE_R * 2 * 1) / 100;
   const fill = color === 'red' ? RED : BLACK;
   if (!d) {
     // Fallback if a glyph path is missing: draw the character as text.
     return `<text class="piece-glyph-text" x="${cx}" y="${cy}" fill="${fill}">${ROLE_GLYPH[color][role]}</text>`;
   }
   return (
-    `<g transform="translate(${cx} ${cy}) scale(${scale}) translate(-50 -50)" ` +
+    `<g transform="translate(${cx} ${cy}) scale(${scale}) translate(-50 -52)" ` +
     `fill="${fill}"><path d="${d}" /></g>`
   );
 }
@@ -277,6 +277,16 @@ export class JieqiBoard {
     const { perspective, view } = state;
     if (!view) return '';
     const targets = this.legalTargets();
+    const clickable = new Set<JieqiSquare>();
+    if (this.selected) {
+      for (const to of targets.keys()) clickable.add(to);
+      clickable.add(this.selected);
+    } else if (state.interactive) {
+      for (const move of view.legalMoves) {
+        const entry = view.board[move.from];
+        if (entry && entry.color === state.sideToMove) clickable.add(move.from);
+      }
+    }
     const layers: string[] = [];
     layers.push(`<rect class="board-bed" x="0" y="0" width="${VIEW_W}" height="${VIEW_H}" rx="14" />`);
     layers.push(riverSvg(perspective));
@@ -299,8 +309,9 @@ export class JieqiBoard {
       for (let file = 0; file < FILES; file += 1) {
         const square = squareAt(file, rank);
         const { x, y } = point(file, rank, perspective);
+        const hitClass = 'board-hit' + (clickable.has(square) ? ' board-hit--clickable' : '');
         targets2.push(
-          `<circle class="board-hit" data-square="${square}" cx="${x}" cy="${y}" r="${CELL * 0.44}" />`,
+          `<circle class="${hitClass}" data-square="${square}" cx="${x}" cy="${y}" r="${CELL * 0.44}" />`,
         );
       }
     }
@@ -323,7 +334,8 @@ export class JieqiBoard {
       const { x, y } = point(fileOf(square), rankOf(square), perspective);
       const classes =
         `piece-slot` +
-        (square === this.selected ? ' piece-slot--selected' : '');
+        (square === this.selected ? ' piece-slot--selected' : '') +
+        (clickable.has(square) ? ' piece-slot--clickable' : '');
       layers.push(
         `<g class="${classes}" data-square="${square}">${pieceSvg(entry.color, entry, x, y)}</g>`,
       );
