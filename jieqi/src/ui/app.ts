@@ -40,7 +40,15 @@ export class App {
     });
     return h('header', { class: 'app-header' }, [
       h('div', { class: 'brand' }, [
-        h('span', { class: 'brand__mark', text: '揭' }),
+        h('img', {
+          class: 'brand__mark',
+          attrs: {
+            src: `${import.meta.env.BASE_URL}apple-touch-icon.png`,
+            alt: '揭棋',
+            width: 42,
+            height: 42,
+          },
+        }),
         h('div', {}, [
           h('h1', { text: '揭棋 · Jieqi' }),
           h('p', { class: 'muted', text: '浏览器内的揭棋：人机 / 人人 / 复盘分析' }),
@@ -59,9 +67,38 @@ export class App {
 
   private footer(): HTMLElement {
     return h('footer', { class: 'app-footer' }, [
-      h('span', {
-        text: 'AI 为 PikaJieQi（Pikafish 揭棋分支）WebAssembly，GPL-3.0-or-later；应用代码 AGPL-3.0-or-later。',
-      }),
+      h('span', {}, [
+        'AI 为 ',
+        h('a', {
+          text: 'PikaJieQi',
+          attrs: {
+            href: 'https://github.com/official-pikafish/Pikafish/tree/jieqi_old',
+            target: '_blank',
+            rel: 'noopener noreferrer',
+          },
+        }),
+        ' WebAssembly, GPL-3.0-or-later; ',
+        h('a', {
+          text: '本项目',
+          attrs: {
+            href: 'https://github.com/iwestlin/mistboard-jieqi',
+            target: '_blank',
+            rel: 'noopener noreferrer',
+          },
+        }),
+        ' AGPL-3.0-or-later',
+        h('span', {}, [
+          ' 修改自 ',
+          h('a', {
+            text: 'Mistboard',
+            attrs: {
+              href: 'https://github.com/brianhliou/mistboard',
+              target: '_blank',
+              rel: 'noopener noreferrer',
+            },
+          })
+        ])
+      ]),
     ]);
   }
 

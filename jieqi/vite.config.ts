@@ -16,5 +16,9 @@ export default defineConfig({
   base: './',
   server: { headers: crossOriginIsolation },
   preview: { headers: crossOriginIsolation },
-  build: { target: 'es2022', assetsInlineLimit: 0 },
+  build: {
+    target: 'es2022',
+    assetsInlineLimit: 0,
+    emptyOutDir: false,
+  },
 });

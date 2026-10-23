@@ -57,14 +57,11 @@ h2 {
 }
 
 .brand__mark {
-  display: grid;
-  place-items: center;
+  display: block;
   width: 42px;
   height: 42px;
   border-radius: 10px;
-  background: linear-gradient(160deg, #b3372b, #7c231c);
-  font-size: 24px;
-  font-weight: 700;
+  object-fit: cover;
 }
 
 .brand h1 {
@@ -123,6 +120,14 @@ h2 {
   padding: 0 20px 28px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.app-footer > span {
+  display: block;
+}
+
+.app-footer a {
+  color: var(--accent);
 }
 
 /* ── layout ────────────────────────────────────────────────────────────── */
